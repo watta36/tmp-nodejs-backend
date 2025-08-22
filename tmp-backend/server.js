@@ -151,4 +151,39 @@ if (!IS_VERCEL) {                                            // CHANGED
   });
 }
 
+
+// ✅ อนุญาตได้หลาย origin ด้วย ENV คั่นด้วยคอมมา
+const RAW_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:4200')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+  // ใช้ cors แบบเป็นฟังก์ชัน origin
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);                       // non-browser client
+    if (RAW_ORIGINS.includes(origin)) return cb(null, true);  // allowlist
+    return cb(new Error('Not allowed by CORS: ' + origin), false);
+  },
+  credentials: true,
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type','X-XSRF-TOKEN','Authorization']
+}));
+
+// ✅ ให้ OPTIONS ผ่าน
+app.options('*', cors());
+
+// ... โค้ดเดิม ...
+
+function setRefreshCookie(res, token){
+  res.cookie('refresh_token', token, {
+    httpOnly: true,
+    // ต้อง secure เมื่อ Prod/HTTPS (Vercel เป็น HTTPS อยู่แล้ว)
+    secure: IS_PROD,
+    // ✅ ข้ามโดเมนต้องเป็น 'none' (ห้าม 'lax' หรือ 'strict')
+    sameSite: 'none',
+    path: '/auth'
+  });
+}
+
 export default app;                                          // CHANGED
