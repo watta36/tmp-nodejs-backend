@@ -23,6 +23,8 @@ const REFRESH_DAYS = parseInt(process.env.REFRESH_TOKEN_DAYS || '7', 10);
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'changeme1';
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'changeme2';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:4200';
+const IS_PROD = process.env.NODE_ENV === 'production';          // CHANGED
+const IS_VERCEL = !!process.env.VERCEL;                          // CHANGED
 
 // Basic security headers
 app.use(helmet({
@@ -31,7 +33,7 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));
 
-// CORS (allow Angular dev server)
+// CORS
 app.use(cors({
   origin: CORS_ORIGIN,
   credentials: true,
@@ -54,7 +56,7 @@ function loadUsers(){
 function setRefreshCookie(res, token){
   res.cookie('refresh_token', token, {
     httpOnly: true,
-    secure: false, // set true behind HTTPS
+    secure: IS_PROD,              // CHANGED (true บน https/prod)
     sameSite: 'strict',
     path: '/auth'
   });
@@ -62,13 +64,14 @@ function setRefreshCookie(res, token){
 function clearRefreshCookie(res){
   res.clearCookie('refresh_token', { path: '/auth' });
 }
-// For Angular XSRF module: send readable cookie; we don't strictly enforce CSRF on /auth/* for demo.
+
+// XSRF helper cookie (อ่านได้ฝั่ง FE)
 app.use((req, res, next) => {
   if (!req.cookies['XSRF-TOKEN']) {
     const csrf = Math.random().toString(36).slice(2);
     res.cookie('XSRF-TOKEN', csrf, {
       httpOnly: false,
-      secure: false, // set true on HTTPS
+      secure: IS_PROD,            // CHANGED
       sameSite: 'lax',
       path: '/'
     });
@@ -104,14 +107,12 @@ app.post('/auth/refresh', (req, res) => {
   if (!rt) return res.status(401).json({ message: 'no refresh token' });
   try {
     const decoded = verifyToken(rt, REFRESH_SECRET);
-    // In real apps, check token rotation / revocation store here
     const users = loadUsers();
     const user = users.find(u => u.id === decoded.sub);
     if (!user) return res.status(401).json({ message: 'invalid refresh' });
 
     const payload = { sub: user.id, email: user.email, roles: user.roles };
     const accessToken = signAccessToken(payload, ACCESS_SECRET, ACCESS_MIN);
-    // Optionally rotate refresh token:
     const newRefresh = signRefreshToken({ sub: user.id }, REFRESH_SECRET, REFRESH_DAYS);
     setRefreshCookie(res, newRefresh);
 
@@ -125,13 +126,13 @@ app.post('/auth/refresh', (req, res) => {
   }
 });
 
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', (_req, res) => {
   clearRefreshCookie(res);
   return res.json({ ok: true });
 });
 
-// Example protected API (requires Authorization: Bearer <token>)
-app.get('/api/profile', (req, res) => {
+// ❗ เปลี่ยนจาก /api/profile -> /profile กัน /api ซ้อน /api ใน Vercel
+app.get('/profile', (req, res) => {                          // CHANGED
   const auth = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return res.status(401).json({ message: 'missing access token' });
@@ -143,6 +144,11 @@ app.get('/api/profile', (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Auth server listening on http://localhost:${PORT}`);
-});
+// ✅ อย่าฟังพอร์ตเมื่อรันบน Vercel
+if (!IS_VERCEL) {                                            // CHANGED
+  app.listen(PORT, () => {
+    console.log(`Auth server listening on http://localhost:${PORT}`);
+  });
+}
+
+export default app;                                          // CHANGED
